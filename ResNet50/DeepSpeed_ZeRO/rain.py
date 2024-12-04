@@ -14,7 +14,7 @@ from torchvision.models import resnet50
 import time
 
 
-dl_path = './cifar10-data'
+dl_path = './tmp/cifar10-data'
 
 def cifar_trainset(local_rank, dl_path=dl_path):
     transform = transforms.Compose(
