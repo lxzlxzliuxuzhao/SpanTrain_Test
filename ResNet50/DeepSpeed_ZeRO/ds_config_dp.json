@@ -1,0 +1,26 @@
+ {
+  "train_batch_size" : 256,
+  "zero_optimization": {
+    "stage": 0,
+    "allgather_partitions": true,
+    "allgather_bucket_size": 50000000,
+    "overlap_comm": true,
+    "reduce_scatter": true,
+    "reduce_bucket_size": 50000000
+  },
+
+   "optimizer": {
+    "type": "Adam",
+    "params": {
+      "lr": 0.001,
+      "betas": [ 
+        0.9,
+        0.999
+      ],
+      "eps": 1e-8
+    }
+  },
+  
+  "steps_per_print" : 10,
+  "wall_clock_breakdown" : false
+ }
