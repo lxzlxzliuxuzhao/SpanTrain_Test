@@ -1,0 +1,19 @@
+# 忽略所有以 events.out.tfevents. 开头的文件
+events.out.tfevents.*
+
+# 忽略临时文件和日志文件
+*.log
+*.tmp
+
+# 忽略编译后的 Python 文件
+*.pyc
+*.pyo
+__pycache__/
+
+# 忽略虚拟环境目录
+venv/
+env/
+
+# 忽略操作系统生成的文件
+.DS_Store
+Thumbs.db
