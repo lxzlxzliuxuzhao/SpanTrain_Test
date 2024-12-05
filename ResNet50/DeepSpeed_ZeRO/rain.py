@@ -20,8 +20,6 @@ def cifar_trainset(local_rank, dl_path=dl_path):
     transform = transforms.Compose(
         [transforms.Pad(4), transforms.RandomHorizontalFlip(), transforms.RandomCrop(32), transforms.ToTensor()]
     )
-
-
     # Ensure only one rank downloads.
     dist.barrier()
     if local_rank != 0:
