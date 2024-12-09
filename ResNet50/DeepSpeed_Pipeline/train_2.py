@@ -68,7 +68,10 @@ def get_args():
                         type=str,
                         default='nccl',
                         help='distributed backend')
-    parser.add_argument('--seed', type=int, default=1138, help='PRNG seed')
+    parser.add_argument('--seed', 
+                        type=int, 
+                        default=1138, 
+                        help='PRNG seed')
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
     return args
@@ -131,6 +134,29 @@ def join_layers(vision_model):
     ]
     return layers
 
+def validate(engine, valset, batch_size):
+    criterion = torch.nn.CrossEntropyLoss()
+    dataloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False)
+    correct = 0
+    total = 0
+    total_loss = 0.0
+
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs, labels = batch[0].to(engine.device), batch[1].to(engine.device)
+            outputs = engine.module(inputs)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    avg_loss = total_loss / len(dataloader)
+    accuracy = 100 * correct / total
+    engine.train()  
+    return avg_loss, accuracy
+    
+
 
 def train_pipe(args, part='parameters'):
     torch.manual_seed(args.seed)
@@ -151,6 +177,7 @@ def train_pipe(args, part='parameters'):
                          activation_checkpoint_interval=0)
 
     trainset = cifar_trainset(args.local_rank)
+    valset = cifar_valset()
 
     engine, _, _, _ = deepspeed.initialize(
         args=args,
@@ -158,24 +185,29 @@ def train_pipe(args, part='parameters'):
         model_parameters=[p for p in net.parameters() if p.requires_grad],
         training_data=trainset)
 
-    start_time = time.time()
     for epoch in range(args.epochs):
         for step in range(len(trainset) // engine.train_micro_batch_size_per_gpu()):    
+            start_time = time.time()
             loss = engine.train_batch()
-            
             end_time = time.time()
             elapsed_time = end_time - start_time
             it_per_sec = 1 / elapsed_time
+
             writer.add_scalar("Learning Rate", engine.optimizer.param_groups[0]["lr"], step)
             writer.add_scalar("Loss/train", loss.item(), step)
             writer.add_scalar("Speed/iterations_per_sec", it_per_sec, step)
+            
             if step % 10 == 0:
                 print(f"Iteration {step} (Epoch {epoch+1}): {it_per_sec} it/s")
-            start_time = end_time
-        valset = cifar_valset()
+
+        
+        val_loss, val_acc = validate(engine, valset, engine.train_micro_batch_size_per_gpu())
+        print(f"Epoch {epoch + 1}/{args.epochs}: Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+        writer.add_scalar("Loss/validation", val_loss, epoch)
+        writer.add_scalar("Accuracy/validation", val_acc, epoch)
+
         if epoch % 5 == 0:  # 每 5 个 epoch 保存一次检查点
             engine.save_checkpoint("./tmp", tag=f"epoch_{epoch}")
-        print(f"Epoch {epoch+1}/{args.epochs}: {it_per_sec} it/s")
 
 
 if __name__ == '__main__':

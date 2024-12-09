@@ -13,15 +13,7 @@
       "eps": 1e-8
     }
   },
-  "scheduler": {
-    "type": "WarmupDecayLR",
-    "params": {
-      "warmup_min_lr": 0.00000001,
-      "warmup_max_lr": 0.001,
-      "warmup_num_steps": 500,
-      "total_num_steps": 1000
-    }
-  },
+
   "checkpoint": {
         "tag": "training_stage_1",
         "load_dir": "/home/lxz/桌面/pipeline_parallelism/tmp"

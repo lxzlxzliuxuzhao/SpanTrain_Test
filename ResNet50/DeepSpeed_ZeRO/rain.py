@@ -71,14 +71,14 @@ def train_base(args):
 
     rank = dist.get_rank()
     criterion = torch.nn.CrossEntropyLoss()
-    total_epochs = 100
+    total_epochs = args.epochs
 
     # Get batch size from DeepSpeed config
     batch_size = engine.train_micro_batch_size_per_gpu()
 
     for epoch in range(total_epochs):
-        start_time = time.time()
         for step in range(len(trainset) // batch_size):
+            start_time = time.time()
             batch = next(data_iter)
             inputs = batch[0].to(engine.device)
             labels = batch[1].to(engine.device)
@@ -90,7 +90,7 @@ def train_base(args):
 
         end_time = time.time()
         elapsed_time = end_time - start_time
-        it_per_sec = len(trainset) / elapsed_time
+        it_per_sec = 1 / elapsed_time
 
         print(f"Epoch {epoch + 1}/{total_epochs}: {it_per_sec:.2f} it/s, Loss: {loss.item():.4f}")
         writer.add_scalar("Loss/train", loss.item(), epoch)
