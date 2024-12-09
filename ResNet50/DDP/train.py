@@ -7,12 +7,15 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torch.distributed as dist
-from torch.utils.data import DataLoader
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.utils.data import DataLoader, DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.models import resnet50
 
 # 设置分布式训练
 def setup(rank, world_size):
+    
+    
+    # 初始化进程组
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
@@ -33,54 +36,56 @@ def evaluate(model, val_loader, device):
     accuracy = 100 * correct / total
     return accuracy
 
-def main(args):
-    rank = int(os.environ["RANK"])
-    world_size = int(os.environ["WORLD_SIZE"])
+def main(rank, world_size, args):
     
     setup(rank, world_size)
 
     # 数据集和数据加载器
-    transform = transforms.Compose(
-        [transforms.Pad(4), transforms.RandomHorizontalFlip(), transforms.RandomCrop(32), transforms.ToTensor()]
-    )
+    transform = transforms.Compose([
+        transforms.Pad(4),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomCrop(32),
+        transforms.ToTensor()
+    ])
     
     train_dataset = datasets.CIFAR10(root=args.data_root, train=True, download=True, transform=transform)
-    train_sampler = torch.utils.data.DistributedSampler(train_dataset)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler)
+    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler, pin_memory=True)
 
     val_dataset = datasets.CIFAR10(root=args.data_root, train=False, download=True, transform=transform)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True)
 
-    # 创建 ResNet50 模型并使用 FSDP 包装
+    # 创建 ResNet50 模型并使用 DDP 包装
     model = resnet50(num_classes=10).to(rank)
-    fsdp_model = FSDP(model)
+    ddp_model = DDP(model, device_ids=[rank])
 
     # 优化器
-    optimizer = optim.Adam(fsdp_model.parameters(), lr=args.learning_rate)
+    optimizer = optim.Adam(ddp_model.parameters(), lr=args.learning_rate)
 
     # 训练循环
     num_epochs = args.num_epochs
     for epoch in range(num_epochs):
-        fsdp_model.train()
+        ddp_model.train()
         train_sampler.set_epoch(epoch)  # 设置每个 epoch 的 sampler
 
         start_time = time.time()  # 记录开始时间
         for i, (inputs, labels) in enumerate(train_loader):
             inputs, labels = inputs.to(rank), labels.to(rank)
             optimizer.zero_grad()
-            outputs = fsdp_model(inputs)
+            outputs = ddp_model(inputs)
             loss = nn.CrossEntropyLoss()(outputs, labels)
             loss.backward()
             optimizer.step()
 
-            if (i + 1) % 10 == 0:
+            if rank == 0 and (i + 1) % 10 == 0:
                 end_time = time.time()  # 记录结束时间
                 throughput = 10 * train_loader.batch_size / (end_time - start_time)
-                print(f"Epoch [{epoch + 1}/{num_epochs}], Iteration [{i + 1}/{len(train_loader)}], Loss: {loss.item():.4f}, Throughput: {throughput:.2f} samples/s")
+                print(f"Rank {rank}, Epoch [{epoch + 1}/{num_epochs}], Iteration [{i + 1}/{len(train_loader)}], Loss: {loss.item():.4f}, Throughput: {throughput:.2f} samples/s")
                 start_time = end_time  # 更新开始时间为当前时间
 
-        accuracy = evaluate(fsdp_model, val_loader, device=torch.device('cuda'))
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Validation Accuracy: {accuracy:.2f}%")
+        if rank == 0:
+            accuracy = evaluate(ddp_model, val_loader, device=torch.device('cuda', rank))
+            print(f"Rank {rank}, Epoch [{epoch + 1}/{num_epochs}], Validation Accuracy: {accuracy:.2f}%")
 
     cleanup()
 
@@ -88,7 +93,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
     parser.add_argument('--data-root', 
                         type=str, 
-                        default='../DeepSpeed_ZeRO/tmp/cifar10-data', 
+                        default='../DeepSpeed_ZeRO/tmp/cifar10-data',
                         help='Path to CIFAR-10 dataset')
     parser.add_argument('--batch-size', 
                         type=int, 
@@ -102,5 +107,15 @@ if __name__ == "__main__":
                         type=int, 
                         default=10, 
                         help='Number of epochs to train')
+    parser.add_argument('--world-size', 
+                        type=int, 
+                        default=1, 
+                        help='Number of processes participating in the job')
+    parser.add_argument('--rank', 
+                        type=int, 
+                        default=0, 
+                        help='Rank of this process')
     args = parser.parse_args()
-    main(args)
+
+    # 如果是多GPU环境，需要通过torchrun或者类似的工具启动
+    main(args.rank, args.world_size, args)
