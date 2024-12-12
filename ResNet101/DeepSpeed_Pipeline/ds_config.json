@@ -1,0 +1,26 @@
+ {
+  "train_batch_size" : 256,
+  "train_micro_batch_size_per_gpu" : 256,
+
+   "optimizer": {
+    "type": "Adam",
+    "params": {
+      "lr": 0.001,
+      "betas": [ 
+        0.9,
+        0.999
+      ],
+      "eps": 1e-8
+    }
+  },
+
+  "checkpoint": {
+        "tag": "training_stage_1",
+        "load_dir": "/home/lxz/桌面/pipeline_parallelism/tmp"
+  },
+  "save_interval": 50,
+  "max_checkpoints": 5,
+  "save_latest_checkpoint": true,
+  "steps_per_print" : 10,
+  "wall_clock_breakdown" : false
+ }
