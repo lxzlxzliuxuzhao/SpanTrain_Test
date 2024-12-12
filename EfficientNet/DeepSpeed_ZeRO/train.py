@@ -60,7 +60,7 @@ def train_base(args):
 
     # Initialize model and data
     # 加载 EfficientNet-B0 模型
-    net = efficientnet_b0(pretrained=True)  # 加载预训练权重
+    net = efficientnet_b0(pretrained=False)  # 加载预训练权重
     net.classifier[1] = torch.nn.Linear(net.classifier[1].in_features, 10)  # 修改为 CIFAR-10 的 10 类
 
     trainset = cifar_trainset(args.local_rank)
