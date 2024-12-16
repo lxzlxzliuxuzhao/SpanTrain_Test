@@ -136,15 +136,18 @@ def join_layers(vision_model):
 
 def validate(engine, valset, batch_size):
     criterion = torch.nn.CrossEntropyLoss()
-    dataloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False)
+    dataloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False, drop_last=True)
+    data_iter = iter(dataloader)
+    
     correct = 0
     total = 0
     total_loss = 0.0
 
     with torch.no_grad():
-        for batch in dataloader:
-            inputs, labels = batch[0].to(engine.device), batch[1].to(engine.device)
-            outputs = engine.module(inputs)
+        for batch in dataloader:  # 遍历数据批次
+            inputs, labels = batch[0].to(engine.device), batch[1].to(engine.device)  # 获取 inputs 和 labels
+            loss, outputs = engine.eval_batch(data_iter=data_iter, return_logits=True)  # 让 eval_batch 自行取数据
+            
             loss = criterion(outputs, labels)
             total_loss += loss.item()
             _, predicted = torch.max(outputs.data, 1)
@@ -153,7 +156,6 @@ def validate(engine, valset, batch_size):
 
     avg_loss = total_loss / len(dataloader)
     accuracy = 100 * correct / total
-    engine.train()  
     return avg_loss, accuracy
     
 
