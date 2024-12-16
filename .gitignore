@@ -17,3 +17,6 @@ env/
 # 忽略操作系统生成的文件
 .DS_Store
 Thumbs.db
+
+# 忽略 PyTorch 检查点文件
+*.pt
