@@ -207,6 +207,7 @@ def train_pipe(args, part='parameters'):
                          activation_checkpoint_interval=0)
 
     trainset = cifar_trainset(args.local_rank)
+    trainset = PaddedDataset(trainset, 256)
     valset = cifar_valset()
 
     engine, _, _, _ = deepspeed.initialize(
