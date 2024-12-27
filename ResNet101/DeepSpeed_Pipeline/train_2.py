@@ -34,6 +34,24 @@ def cifar_trainset(local_rank, dl_path=dl_path):
         dist.barrier()
     return trainset
 
+class PaddedDataset(torch.utils.data.Dataset):
+    def __init__(self, dataset, batch_size):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        
+        # 计算需要填充的数量
+        self.pad_size = (batch_size - len(dataset) % batch_size) % batch_size
+        self.length = len(dataset) + self.pad_size
+        
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        if idx < len(self.dataset):
+            return self.dataset[idx]
+        else:
+            # 循环使用数据集开头的数据进行填充
+            return self.dataset[idx % len(self.dataset)]
 
 def cifar_valset(dl_path=dl_path):
     transform = transforms.Compose(
@@ -139,24 +157,34 @@ def validate(engine, valset, batch_size):
     dataloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False, drop_last=True)
     data_iter = iter(dataloader)
     
-    correct = 0
-    total = 0
-    total_loss = 0.0
+    # 只在最后阶段初始化计数器
+    if engine.is_last_stage():
+        correct = 0
+        total = 0
+        total_loss = 0.0
 
     with torch.no_grad():
-        for batch in dataloader:  # 遍历数据批次
-            inputs, labels = batch[0].to(engine.device), batch[1].to(engine.device)  # 获取 inputs 和 labels
-            loss, outputs = engine.eval_batch(data_iter=data_iter, return_logits=True)  # 让 eval_batch 自行取数据
+        for batch in dataloader:
+            inputs, labels = batch[0].to(engine.device), batch[1].to(engine.device)
+            loss, outputs = engine.eval_batch(data_iter=data_iter, return_logits=True)
             
-            loss = criterion(outputs, labels)
-            total_loss += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
+            # 只在最后阶段计算损失和准确率
+            if engine.is_last_stage():
+                loss = criterion(outputs, labels)
+                total_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
 
-    avg_loss = total_loss / len(dataloader)
-    accuracy = 100 * correct / total
-    return avg_loss, accuracy
+    # 只在最后阶段计算最终结果
+    if engine.is_last_stage():
+        avg_loss = total_loss / len(dataloader)
+        accuracy = 100 * correct / total
+        return avg_loss, accuracy
+    else:
+        # 非最后阶段返回None
+        return None, None
+
     
 
 
@@ -204,11 +232,13 @@ def train_pipe(args, part='parameters'):
 
         
         val_loss, val_acc = validate(engine, valset, engine.train_micro_batch_size_per_gpu())
-        print(f"Epoch {epoch + 1}/{args.epochs}: Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
-        writer.add_scalar("Loss/validation", val_loss, epoch)
-        writer.add_scalar("Accuracy/validation", val_acc, epoch)
+        if engine.is_last_stage():
+            print(f"Epoch {epoch + 1}/{args.epochs}: Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+            writer.add_scalar("Loss/validation", val_loss, epoch)
+            writer.add_scalar("Accuracy/validation", val_acc, epoch)
 
-        if epoch % 5 == 0:  # 每 5 个 epoch 保存一次检查点
+
+        if epoch % 10 == 0:  # 每 5 个 epoch 保存一次检查点
             engine.save_checkpoint("./tmp", tag=f"epoch_{epoch}")
 
 
