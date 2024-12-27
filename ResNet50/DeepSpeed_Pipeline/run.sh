@@ -1,3 +1,3 @@
 #!/bin/bash
 
-deepspeed train_2.py --deepspeed_config=ds_config.json -p 1 -e 100
+deepspeed --hostfile=hostfile train_2.py --deepspeed_config=ds_config.json -p 2 -e 100
