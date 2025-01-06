@@ -22,5 +22,5 @@
   },
   
   "steps_per_print" : 10,
-  "wall_clock_breakdown" : false
+  "wall_clock_breakdown" : true
  }

@@ -1,26 +1,37 @@
- {
-  "train_batch_size" : 64,
-  "train_micro_batch_size_per_gpu" : 64,
+{
+  "train_batch_size": 64,
+  "train_micro_batch_size_per_gpu": 64,
+  "gradient_accumulation_steps": 1,
 
-   "optimizer": {
+  "optimizer": {
     "type": "Adam",
     "params": {
-      "lr": 0.001,
-      "betas": [ 
-        0.9,
-        0.999
-      ],
-      "eps": 1e-8
+      "lr": 0.002,
+      "betas": [0.9, 0.999],
+      "eps": 1e-8,
+      "weight_decay": 0.01
     }
   },
 
+  "scheduler": {
+    "type": "WarmupCosineLR",
+    "params": {
+      "warmup_min_lr": 0,
+      "warmup_max_lr": 0.002,
+      "warmup_num_steps": 1000,
+      "total_num_steps": 40000
+    }
+  },
+
+  "gradient_clipping": 1.0,
+
   "checkpoint": {
-        "tag": "training_stage_1",
-        "load_dir": "/home/lxz/桌面/pipeline_parallelism/tmp"
+    "tag": "training_stage_1",
+    "load_dir": "/home/lxz/桌面/pipeline_parallelism/tmp"
   },
   "save_interval": 50,
   "max_checkpoints": 5,
   "save_latest_checkpoint": true,
-  "steps_per_print" : 10,
-  "wall_clock_breakdown" : false
- }
+  "steps_per_print": 10,
+  "wall_clock_breakdown": true
+}

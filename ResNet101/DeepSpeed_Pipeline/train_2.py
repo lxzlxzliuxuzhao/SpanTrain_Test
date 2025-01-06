@@ -210,36 +210,49 @@ def train_pipe(args, part='parameters'):
     trainset = PaddedDataset(trainset, 256)
     valset = cifar_valset()
 
+    start_time = time.time()
+    target_accuracy = 80.0
+    reached_target = False
+    
     engine, _, _, _ = deepspeed.initialize(
         args=args,
         model=net,
         model_parameters=[p for p in net.parameters() if p.requires_grad],
         training_data=trainset)
-
+    total_step = 0
     for epoch in range(args.epochs):
         for step in range(len(trainset) // engine.train_micro_batch_size_per_gpu()):    
-            start_time = time.time()
+            start_time_batch = time.time()
             loss = engine.train_batch()
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            it_per_sec = 1 / elapsed_time
+            end_time_batch = time.time()
+            elapsed_time_batch = end_time_batch - start_time_batch
+            it_per_sec = 1 / elapsed_time_batch
 
-            writer.add_scalar("Learning Rate", engine.optimizer.param_groups[0]["lr"], step)
-            writer.add_scalar("Loss/train", loss.item(), step)
-            writer.add_scalar("Speed/iterations_per_sec", it_per_sec, step)
+            writer.add_scalar("Learning Rate", engine.optimizer.param_groups[0]["lr"], total_step)
+            writer.add_scalar("Loss/train", loss.item(), total_step)
+            writer.add_scalar("Speed/iterations_per_sec", it_per_sec, total_step)
             
+            total_step += 1
             if step % 10 == 0:
                 print(f"Iteration {step} (Epoch {epoch+1}): {it_per_sec} it/s")
 
-        
         val_loss, val_acc = validate(engine, valset, engine.train_micro_batch_size_per_gpu())
         if engine.is_last_stage():
             print(f"Epoch {epoch + 1}/{args.epochs}: Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
             writer.add_scalar("Loss/validation", val_loss, epoch)
             writer.add_scalar("Accuracy/validation", val_acc, epoch)
 
+            # 检查是否达到目标准确率
+            if val_acc >= target_accuracy and not reached_target:
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                print(f"Reached {target_accuracy}% accuracy at epoch {epoch + 1}, step {step}. Time taken: {elapsed_time:.2f} seconds")
+                reached_target = True
+                # 保存最终模型
+                engine.save_checkpoint("./tmp", tag="final_model")
+                return  # 提前结束训练
 
-        if epoch % 10 == 0:  # 每 5 个 epoch 保存一次检查点
+        if epoch % 5 == 0:  # 每 5 个 epoch 保存一次检查点
             engine.save_checkpoint("./tmp", tag=f"epoch_{epoch}")
 
 
