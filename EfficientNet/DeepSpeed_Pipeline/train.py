@@ -18,13 +18,7 @@ dl_path = '../../ResNet50/DeepSpeed_ZeRO/tmp/cifar10-data/cifar-10-python'
 
 def cifar_trainset(local_rank, dl_path=dl_path):
     transform = transforms.Compose(
-        [
-            transforms.Resize((224, 224)),  # 调整到 EfficientNet 的输入分辨率
-            transforms.Pad(4),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(224),  # 确保随机裁剪后的分辨率正确
-            transforms.ToTensor(),
-        ]
+        [transforms.Pad(4), transforms.RandomHorizontalFlip(), transforms.RandomCrop(32), transforms.ToTensor()]
     )
 
     # Ensure only one rank downloads.
@@ -40,7 +34,6 @@ def cifar_trainset(local_rank, dl_path=dl_path):
 def cifar_valset(dl_path=dl_path):
     transform = transforms.Compose(
         [
-            transforms.Resize((224, 224)),  # 调整到 EfficientNet 的输入分辨率
             transforms.ToTensor(),
         ]
     )
@@ -143,12 +136,16 @@ def train_base(args):
 
 # 修改 join_layers 函数以适应 EfficientNet
 def join_layers(vision_model):
-    layers = [
-        vision_model.features,  # EfficientNet特有的特征提取部分
+    layers = []
+    # 拆解 features 部分
+    for layer in vision_model.features:
+        layers.append(layer)
+    # 添加后续部分
+    layers.extend([
         vision_model.avgpool,
         lambda x: torch.flatten(x, 1),
         vision_model.classifier,
-    ]
+    ])
     return layers
 
 def validate(engine, valset, batch_size):
@@ -193,7 +190,7 @@ def train_pipe(args, part='parameters'):
     #
 
     # 使用 EfficientNet-B0
-    net = efficientnet_b0(pretrained=True)  # 加载预训练权重
+    net = efficientnet_b0(pretrained=False)  # 加载预训练权重
     net.classifier[1] = torch.nn.Linear(net.classifier[1].in_features, 10)  # 修改为 CIFAR-10 的 10 类
 
     net = PipelineModule(layers=join_layers(net),
