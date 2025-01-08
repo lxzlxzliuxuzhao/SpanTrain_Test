@@ -33,9 +33,7 @@ def cifar_trainset(local_rank, dl_path=dl_path):
 
 def cifar_valset(dl_path=dl_path):
     transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-        ]
+        [transforms.ToTensor()]
     )
     valset = torchvision.datasets.CIFAR10(root=dl_path, train=False, transform=transform)
     return valset
@@ -136,10 +134,21 @@ def train_base(args):
 
 # 修改 join_layers 函数以适应 EfficientNet
 def join_layers(vision_model):
+    def unpack_modules(module):
+        """递归展开子模块，返回一个扁平化的模块列表"""
+        layers = []
+        if isinstance(module, torch.nn.Sequential):
+            for submodule in module:
+                layers.extend(unpack_modules(submodule))
+        else:
+            layers.append(module)
+        return layers
+
     layers = []
-    # 拆解 features 部分
+    # 递归拆解 features 部分
     for layer in vision_model.features:
-        layers.append(layer)
+        layers.extend(unpack_modules(layer))
+    
     # 添加后续部分
     layers.extend([
         vision_model.avgpool,
@@ -244,7 +253,7 @@ def train_pipe(args, part='parameters'):
                 reached_target = True
                 # 保存最终模型
                 engine.save_checkpoint("./tmp", tag="final_model")
-                return  # 提前结束训练
+                #return  # 提前结束训练
 
         if epoch % 10 == 0:  # 每 5 个 epoch 保存一次检查点
             engine.save_checkpoint("./tmp", tag=f"epoch_{epoch}")
