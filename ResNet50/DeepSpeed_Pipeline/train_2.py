@@ -241,7 +241,8 @@ def train_pipe(args, part='parameters'):
 
         val_loss, val_acc = validate(engine, valset, engine.train_micro_batch_size_per_gpu())
         if engine.is_last_stage():
-            print(f"Epoch {epoch + 1}/{args.epochs}: Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+            this_time = time.time() - start_time
+            print(f"Epoch {epoch + 1}/{args.epochs}: Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}, Time taken: {this_time:.2f} seconds")
             writer.add_scalar("Loss/validation", val_loss, epoch)
             writer.add_scalar("Accuracy/validation", val_acc, epoch)
 

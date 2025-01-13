@@ -76,10 +76,13 @@ def train_base(args):
     # Get batch size from DeepSpeed config
     batch_size = engine.train_micro_batch_size_per_gpu()
 
+    target_accuracy = 80.0
+    start_time = time.time()  # 记录总训练开始时间
+    
     for epoch in range(total_epochs):
-        for step in range(len(trainset) // batch_size):
-            start_time = time.time()
-            batch = next(data_iter)
+        epoch_start_time = time.time()  # 记录每个epoch开始时间
+        
+        for batch in dataloader:
             inputs = batch[0].to(engine.device)
             labels = batch[1].to(engine.device)
 
@@ -92,15 +95,28 @@ def train_base(args):
         elapsed_time = end_time - start_time
         it_per_sec = 1 / elapsed_time
 
-        print(f"Epoch {epoch + 1}/{total_epochs}: {it_per_sec:.2f} it/s, Loss: {loss.item():.4f}")
+        # 计算当前训练时间
+        current_time = time.time() - start_time
+        epoch_time = time.time() - epoch_start_time
+
+        print(f"Epoch time: {epoch_time:.2f}s, Total time: {current_time:.2f}s")
+        # Validate and check accuracy
+        val_loss, val_acc = validate(engine, valset, batch_size)
+        print(f"Epoch {epoch + 1}/{total_epochs}: Validation Loss: {val_loss:.4f}, "
+              f"Validation Accuracy: {val_acc:.4f}")
+        
         writer.add_scalar("Loss/train", loss.item(), epoch)
         writer.add_scalar("Speed/iterations_per_sec", it_per_sec, epoch)
-
-        # Validate at the end of each epoch
-        val_loss, val_acc = validate(engine, valset, batch_size)
-        print(f"Epoch {epoch + 1}/{total_epochs}: Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
         writer.add_scalar("Loss/validation", val_loss, epoch)
         writer.add_scalar("Accuracy/validation", val_acc, epoch)
+        
+        # 检查是否达到目标准确率
+        if val_acc >= target_accuracy:
+            end_time = time.time()
+            total_time = end_time - start_time
+            print(f"\nReached target accuracy of {target_accuracy}%!")
+            print(f"Total training time: {total_time:.2f} seconds")
+            return  # 提前结束训练
 
 
 def validate(engine, valset, batch_size):
