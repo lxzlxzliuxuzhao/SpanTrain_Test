@@ -17,14 +17,16 @@ dl_path = '../../ResNet50/DeepSpeed_ZeRO/tmp/cifar10-data/cifar-10-python'
 
 def cifar_trainset(local_rank, dl_path=dl_path):
     transform = transforms.Compose(
-        [
-            transforms.Resize((224, 224)),  # 调整到 EfficientNet 的输入分辨率
-            transforms.Pad(4),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(224),  # 确保随机裁剪后的分辨率正确
-            transforms.ToTensor(),
-        ]
-    )
+    [
+        transforms.Pad(4),  # 在图片四周填充4像素
+        transforms.RandomHorizontalFlip(),  # 随机水平翻转
+        transforms.RandomCrop(32),  # 随机裁剪出32x32的区域
+        transforms.RandomRotation(15),  # 随机旋转，最大旋转角度为15度
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),  # 随机调整亮度、对比度、饱和度、色调
+        transforms.ToTensor(),  # 转换为Tensor格式，并将像素值缩放到[0, 1]
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # 标准化
+    ]
+)
     # Ensure only one rank downloads.
     dist.barrier()
     if local_rank != 0:
@@ -37,8 +39,8 @@ def cifar_trainset(local_rank, dl_path=dl_path):
 def cifar_valset(dl_path=dl_path):
     transform = transforms.Compose(
         [
-            transforms.Resize((224, 224)),  # 调整到 EfficientNet 的输入分辨率
             transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # 标准化
         ]
     )
     valset = torchvision.datasets.CIFAR10(root=dl_path, train=False, transform=transform)
@@ -72,20 +74,19 @@ def train_base(args):
         model_parameters=[p for p in net.parameters() if p.requires_grad],
         training_data=trainset)
 
-    dataloader = RepeatingLoader(dataloader)
-    data_iter = iter(dataloader)
-
     rank = dist.get_rank()
     criterion = torch.nn.CrossEntropyLoss()
     total_epochs = args.epochs
-
     # Get batch size from DeepSpeed config
     batch_size = engine.train_micro_batch_size_per_gpu()
 
+    target_accuracy = 80.0
+    start_time = time.time()  # 记录总训练开始时间
+    
     for epoch in range(total_epochs):
-        for step in range(len(trainset) // batch_size):
-            start_time = time.time()
-            batch = next(data_iter)
+        epoch_start_time = time.time()  # 记录每个epoch开始时间
+        
+        for batch in dataloader:
             inputs = batch[0].to(engine.device)
             labels = batch[1].to(engine.device)
 
@@ -98,15 +99,28 @@ def train_base(args):
         elapsed_time = end_time - start_time
         it_per_sec = 1 / elapsed_time
 
-        print(f"Epoch {epoch + 1}/{total_epochs}: {it_per_sec:.2f} it/s, Loss: {loss.item():.4f}")
+        # 计算当前训练时间
+        current_time = time.time() - start_time
+        epoch_time = time.time() - epoch_start_time
+
+        print(f"Epoch time: {epoch_time:.2f}s, Total time: {current_time:.2f}s")
+        # Validate and check accuracy
+        val_loss, val_acc = validate(engine, valset, batch_size)
+        print(f"Epoch {epoch + 1}/{total_epochs}: Validation Loss: {val_loss:.4f}, "
+              f"Validation Accuracy: {val_acc:.4f}")
+        
         writer.add_scalar("Loss/train", loss.item(), epoch)
         writer.add_scalar("Speed/iterations_per_sec", it_per_sec, epoch)
-
-        # Validate at the end of each epoch
-        val_loss, val_acc = validate(engine, valset, batch_size)
-        print(f"Epoch {epoch + 1}/{total_epochs}: Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
         writer.add_scalar("Loss/validation", val_loss, epoch)
         writer.add_scalar("Accuracy/validation", val_acc, epoch)
+        
+        # 检查是否达到目标准确率
+        if val_acc >= target_accuracy:
+            end_time = time.time()
+            total_time = end_time - start_time
+            print(f"\nReached target accuracy of {target_accuracy}%!")
+            print(f"Total training time: {total_time:.2f} seconds")
+            return  # 提前结束训练
 
 
 def validate(engine, valset, batch_size):
